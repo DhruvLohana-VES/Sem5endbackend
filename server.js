@@ -11,7 +11,7 @@ const app = express();
 // Middleware
 app.use(helmet()); // Security headers
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: '*', // Allow all origins for public API
   credentials: true
 }));
 app.use(express.json());

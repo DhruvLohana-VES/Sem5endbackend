@@ -39,6 +39,7 @@ app.use('/api/notifications', require('./routes/notification.routes'));
 app.use('/api/reports', require('./routes/report.routes'));
 app.use('/api/links', require('./routes/link.routes'));
 app.use('/api/donor', require('./routes/donor.routes'));
+app.use('/api/admin', require('./routes/admin.routes')); // Admin routes (protected)
 
 // Health Check
 app.get('/api/health', (req, res) => {

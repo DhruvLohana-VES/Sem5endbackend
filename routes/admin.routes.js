@@ -18,7 +18,13 @@ const {
   getAllCaretakers,
   getCaretakerById,
   assignPatientToCaretaker,
-  removePatientCaretakerLink
+  removePatientCaretakerLink,
+  getAllDonationRequests,
+  approveDonationRequest,
+  rejectDonationRequest,
+  getAllDonations,
+  findSuitableDonors,
+  getDashboardAnalytics
 } = require('../controllers/admin.controller');
 
 /**
@@ -118,5 +124,43 @@ router.post('/links', protect, authorizeRoles('admin'), assignPatientToCaretaker
 // @desc    Remove patient-caretaker link
 // @access  Admin only
 router.delete('/links/:linkId', protect, authorizeRoles('admin'), removePatientCaretakerLink);
+
+// ============================================
+// DONATION REQUEST MANAGEMENT
+// ============================================
+
+// @route   GET /api/admin/donation-requests
+// @desc    Get all donation requests with filtering
+// @access  Admin only
+router.get('/donation-requests', protect, authorizeRoles('admin'), getAllDonationRequests);
+
+// @route   PATCH /api/admin/donation-requests/:id/approve
+// @desc    Approve a donation request
+// @access  Admin only
+router.patch('/donation-requests/:id/approve', protect, authorizeRoles('admin'), approveDonationRequest);
+
+// @route   PATCH /api/admin/donation-requests/:id/reject
+// @desc    Reject a donation request
+// @access  Admin only
+router.patch('/donation-requests/:id/reject', protect, authorizeRoles('admin'), rejectDonationRequest);
+
+// @route   GET /api/admin/donation-requests/:id/find-donors
+// @desc    Find suitable donors for urgent requests
+// @access  Admin only
+router.get('/donation-requests/:id/find-donors', protect, authorizeRoles('admin'), findSuitableDonors);
+
+// @route   GET /api/admin/donations
+// @desc    Get all donations with details
+// @access  Admin only
+router.get('/donations', protect, authorizeRoles('admin'), getAllDonations);
+
+// ============================================
+// ENHANCED ANALYTICS
+// ============================================
+
+// @route   GET /api/admin/analytics/dashboard
+// @desc    Get comprehensive dashboard analytics
+// @access  Admin only
+router.get('/analytics/dashboard', protect, authorizeRoles('admin'), getDashboardAnalytics);
 
 module.exports = router;

@@ -948,3 +948,472 @@ exports.removePatientCaretakerLink = async (req, res) => {
     });
   }
 };
+
+// ============================================
+// DONATION REQUEST MANAGEMENT
+// ============================================
+
+/**
+ * @desc    Get all donation requests with filtering
+ * @route   GET /api/admin/donation-requests
+ * @access  Admin only
+ */
+exports.getAllDonationRequests = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status, urgent } = req.query;
+    const offset = (page - 1) * limit;
+
+    // Build query
+    let query = supabase
+      .from('donation_requests')
+      .select(`
+        *,
+        patient:users!donation_requests_patient_id_fkey(id, name, email, phone, city)
+      `, { count: 'exact' })
+      .range(offset, offset + parseInt(limit) - 1)
+      .order('created_at', { ascending: false });
+
+    // Add filters
+    if (status) {
+      query = query.eq('status', status);
+    }
+    if (urgent === 'true') {
+      query = query.eq('urgent', true);
+    }
+
+    const { data: requests, error, count } = await query;
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      data: requests || [],
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get all donation requests error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching donation requests',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Approve a donation request
+ * @route   PATCH /api/admin/donation-requests/:id/approve
+ * @access  Admin only
+ */
+exports.approveDonationRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+
+    // Check if request exists
+    const { data: request, error: checkError } = await supabase
+      .from('donation_requests')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (checkError || !request) {
+      return res.status(404).json({
+        success: false,
+        message: 'Donation request not found'
+      });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot approve request with status: ${request.status}`
+      });
+    }
+
+    // Update status to approved
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from('donation_requests')
+      .update({
+        status: 'approved',
+        admin_notes: notes || null,
+        approved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({
+      success: true,
+      message: 'Donation request approved successfully',
+      data: updatedRequest
+    });
+  } catch (error) {
+    console.error('Approve donation request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error approving donation request',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Reject a donation request
+ * @route   PATCH /api/admin/donation-requests/:id/reject
+ * @access  Admin only
+ */
+exports.rejectDonationRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rejection reason is required'
+      });
+    }
+
+    // Check if request exists
+    const { data: request, error: checkError } = await supabase
+      .from('donation_requests')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (checkError || !request) {
+      return res.status(404).json({
+        success: false,
+        message: 'Donation request not found'
+      });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot reject request with status: ${request.status}`
+      });
+    }
+
+    // Update status to rejected
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from('donation_requests')
+      .update({
+        status: 'rejected',
+        rejection_reason: reason,
+        rejected_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({
+      success: true,
+      message: 'Donation request rejected',
+      data: updatedRequest
+    });
+  } catch (error) {
+    console.error('Reject donation request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error rejecting donation request',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Get all donations with details
+ * @route   GET /api/admin/donations
+ * @access  Admin only
+ */
+exports.getAllDonations = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const offset = (page - 1) * limit;
+
+    // Build query
+    let query = supabase
+      .from('donations')
+      .select(`
+        *,
+        donor:users!donations_donor_id_fkey(id, name, email, phone, city),
+        request:donation_requests(
+          id,
+          medication_name,
+          quantity,
+          patient:users!donation_requests_patient_id_fkey(id, name, email)
+        )
+      `, { count: 'exact' })
+      .range(offset, offset + parseInt(limit) - 1)
+      .order('created_at', { ascending: false });
+
+    // Add status filter if provided
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data: donations, error, count } = await query;
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      data: donations || [],
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get all donations error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching donations',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Find suitable donors for urgent requests
+ * @route   GET /api/admin/donation-requests/:id/find-donors
+ * @access  Admin only
+ */
+exports.findSuitableDonors = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 10 } = req.query;
+
+    // Get the donation request
+    const { data: request, error: requestError } = await supabase
+      .from('donation_requests')
+      .select(`
+        *,
+        patient:users!donation_requests_patient_id_fkey(id, name, city)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (requestError || !request) {
+      return res.status(404).json({
+        success: false,
+        message: 'Donation request not found'
+      });
+    }
+
+    // Find active donors
+    const { data: allDonors, error: donorsError } = await supabase
+      .from('users')
+      .select('id, name, email, phone, city, created_at')
+      .eq('role', 'donor')
+      .eq('status', 'active')
+      .order('created_at', { ascending: false });
+
+    if (donorsError) throw donorsError;
+
+    // Get donation history for each donor
+    const donorsWithHistory = await Promise.all(
+      allDonors.map(async (donor) => {
+        const { count: totalDonations } = await supabase
+          .from('donations')
+          .select('*', { count: 'exact', head: true })
+          .eq('donor_id', donor.id)
+          .eq('status', 'completed');
+
+        const { data: recentDonations } = await supabase
+          .from('donations')
+          .select('created_at')
+          .eq('donor_id', donor.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        return {
+          ...donor,
+          totalDonations: totalDonations || 0,
+          lastDonation: recentDonations?.[0]?.created_at || null,
+          sameCity: donor.city === request.patient?.city
+        };
+      })
+    );
+
+    // Sort donors: prioritize same city, then by total donations
+    const sortedDonors = donorsWithHistory
+      .sort((a, b) => {
+        if (a.sameCity && !b.sameCity) return -1;
+        if (!a.sameCity && b.sameCity) return 1;
+        return b.totalDonations - a.totalDonations;
+      })
+      .slice(0, parseInt(limit));
+
+    res.json({
+      success: true,
+      data: {
+        request: {
+          id: request.id,
+          medication_name: request.medication_name,
+          quantity: request.quantity,
+          urgent: request.urgent,
+          patient: request.patient
+        },
+        suitableDonors: sortedDonors,
+        total: sortedDonors.length
+      }
+    });
+  } catch (error) {
+    console.error('Find suitable donors error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error finding suitable donors',
+      error: error.message
+    });
+  }
+};
+
+// ============================================
+// ENHANCED ANALYTICS
+// ============================================
+
+/**
+ * @desc    Get comprehensive dashboard analytics
+ * @route   GET /api/admin/analytics/dashboard
+ * @access  Admin only
+ */
+exports.getDashboardAnalytics = async (req, res) => {
+  try {
+    // Get all users to calculate role counts
+    const { data: allUsers, error: userError } = await supabase
+      .from('users')
+      .select('role, status');
+
+    if (userError) throw userError;
+
+    // Calculate user statistics
+    const userStats = {
+      total: allUsers.length,
+      active: allUsers.filter(u => u.status === 'active').length,
+      inactive: allUsers.filter(u => u.status === 'inactive').length,
+      byRole: {
+        patient: allUsers.filter(u => u.role === 'patient').length,
+        caretaker: allUsers.filter(u => u.role === 'caretaker').length,
+        donor: allUsers.filter(u => u.role === 'donor').length,
+        admin: allUsers.filter(u => u.role === 'admin').length
+      }
+    };
+
+    // Get medication count and most used
+    const { data: allMedications, error: medError } = await supabase
+      .from('medications')
+      .select('name');
+
+    if (medError) throw medError;
+
+    // Count medication frequency
+    const medicationFrequency = allMedications.reduce((acc, med) => {
+      acc[med.name] = (acc[med.name] || 0) + 1;
+      return acc;
+    }, {});
+
+    const mostUsedMedications = Object.entries(medicationFrequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }));
+
+    // Get donation statistics
+    const { count: totalDonations, error: donationCountError } = await supabase
+      .from('donations')
+      .select('*', { count: 'exact', head: true });
+
+    if (donationCountError) throw donationCountError;
+
+    const { count: completedDonations } = await supabase
+      .from('donations')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'completed');
+
+    const { count: pendingDonations } = await supabase
+      .from('donations')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
+
+    // Get donation requests stats
+    const { count: totalRequests } = await supabase
+      .from('donation_requests')
+      .select('*', { count: 'exact', head: true });
+
+    const { count: urgentRequests } = await supabase
+      .from('donation_requests')
+      .select('*', { count: 'exact', head: true })
+      .eq('urgent', true)
+      .eq('status', 'pending');
+
+    // Calculate average adherence rate
+    const { data: allDoses, error: doseError } = await supabase
+      .from('doses')
+      .select('status');
+
+    if (doseError) throw doseError;
+
+    const totalDoses = allDoses.length;
+    const takenDoses = allDoses.filter(d => d.status === 'taken').length;
+    const averageAdherenceRate = totalDoses > 0 
+      ? ((takenDoses / totalDoses) * 100).toFixed(2)
+      : 0;
+
+    // Get caretaker-patient links
+    const { count: totalLinks } = await supabase
+      .from('links')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'active');
+
+    res.json({
+      success: true,
+      data: {
+        users: userStats,
+        medications: {
+          total: allMedications.length,
+          mostUsed: mostUsedMedications
+        },
+        donations: {
+          total: totalDonations || 0,
+          completed: completedDonations || 0,
+          pending: pendingDonations || 0,
+          completionRate: totalDonations > 0 
+            ? ((completedDonations / totalDonations) * 100).toFixed(2)
+            : 0
+        },
+        donationRequests: {
+          total: totalRequests || 0,
+          urgent: urgentRequests || 0
+        },
+        adherence: {
+          totalDoses: totalDoses || 0,
+          takenDoses: takenDoses || 0,
+          averageRate: parseFloat(averageAdherenceRate)
+        },
+        caretakerPatientLinks: totalLinks || 0
+      }
+    });
+  } catch (error) {
+    console.error('Get dashboard analytics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching dashboard analytics',
+      error: error.message
+    });
+  }
+};

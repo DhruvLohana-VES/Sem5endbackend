@@ -20,10 +20,13 @@ const {
   assignPatientToCaretaker,
   removePatientCaretakerLink,
   getAllDonationRequests,
+  createDonationRequest,
   approveDonationRequest,
   rejectDonationRequest,
   getAllDonations,
   findSuitableDonors,
+  notifyDonorsAboutRequest,
+  getAllDonors,
   getDashboardAnalytics
 } = require('../controllers/admin.controller');
 
@@ -134,6 +137,16 @@ router.delete('/links/:linkId', protect, authorizeRoles('admin'), removePatientC
 // @access  Admin only
 router.get('/donation-requests', protect, authorizeRoles('admin'), getAllDonationRequests);
 
+// @route   POST /api/admin/donation-requests
+// @desc    Create a new donation request
+// @access  Admin only
+router.post('/donation-requests', protect, authorizeRoles('admin'), createDonationRequest);
+
+// @route   POST /api/admin/donation-requests/:id/notify-donors
+// @desc    Notify all matching donors about a blood request
+// @access  Admin only
+router.post('/donation-requests/:id/notify-donors', protect, authorizeRoles('admin'), notifyDonorsAboutRequest);
+
 // @route   PATCH /api/admin/donation-requests/:id/approve
 // @desc    Approve a donation request
 // @access  Admin only
@@ -153,6 +166,11 @@ router.get('/donation-requests/:id/find-donors', protect, authorizeRoles('admin'
 // @desc    Get all donations with details
 // @access  Admin only
 router.get('/donations', protect, authorizeRoles('admin'), getAllDonations);
+
+// @route   GET /api/admin/donors
+// @desc    Get all donors with filtering
+// @access  Admin only
+router.get('/donors', protect, authorizeRoles('admin'), getAllDonors);
 
 // ============================================
 // ENHANCED ANALYTICS

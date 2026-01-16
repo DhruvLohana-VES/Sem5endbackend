@@ -613,7 +613,7 @@ exports.getPatientAdherence = async (req, res) => {
     const pendingDoses = doses?.filter(d => d.status === 'pending').length || 0;
     
     const adherenceRate = totalDoses > 0 
-      ? ((takenDoses / totalDoses) * 100).toFixed(2) 
+      ? parseFloat(((takenDoses / totalDoses) * 100).toFixed(2))
       : 0;
 
     res.json({
@@ -966,10 +966,7 @@ exports.getAllDonationRequests = async (req, res) => {
     // Build query
     let query = supabase
       .from('donation_requests')
-      .select(`
-        *,
-        patient:users!donation_requests_patient_id_fkey(id, name, email, phone, city)
-      `, { count: 'exact' })
+      .select('*', { count: 'exact' })
       .range(offset, offset + parseInt(limit) - 1)
       .order('created_at', { ascending: false });
 
@@ -978,7 +975,7 @@ exports.getAllDonationRequests = async (req, res) => {
       query = query.eq('status', status);
     }
     if (urgent === 'true') {
-      query = query.eq('urgent', true);
+      query = query.eq('is_urgent', true);
     }
 
     const { data: requests, error, count } = await query;
@@ -1149,13 +1146,7 @@ exports.getAllDonations = async (req, res) => {
       .from('donations')
       .select(`
         *,
-        donor:users!donations_donor_id_fkey(id, name, email, phone, city),
-        request:donation_requests(
-          id,
-          medication_name,
-          quantity,
-          patient:users!donation_requests_patient_id_fkey(id, name, email)
-        )
+        donor:users!donations_donor_id_fkey(id, name, email, phone, city)
       `, { count: 'exact' })
       .range(offset, offset + parseInt(limit) - 1)
       .order('created_at', { ascending: false });
@@ -1393,7 +1384,7 @@ exports.getDashboardAnalytics = async (req, res) => {
           completed: completedDonations || 0,
           pending: pendingDonations || 0,
           completionRate: totalDonations > 0 
-            ? ((completedDonations / totalDonations) * 100).toFixed(2)
+            ? parseFloat(((completedDonations / totalDonations) * 100).toFixed(2))
             : 0
         },
         donationRequests: {
@@ -1413,6 +1404,205 @@ exports.getDashboardAnalytics = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching dashboard analytics',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Create a new donation request (Admin)
+ * @route   POST /api/admin/donation-requests
+ * @access  Admin only
+ */
+exports.createDonationRequest = async (req, res) => {
+  try {
+    const {
+      hospital_name,
+      location,
+      blood_group,
+      units_needed,
+      urgency_level,
+      contact_number,
+      notes
+    } = req.body;
+
+    // Validate required fields
+    if (!hospital_name || !location || !blood_group || !units_needed || !contact_number) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide all required fields'
+      });
+    }
+
+    // Create donation request
+    const { data: request, error: createError } = await supabase
+      .from('donation_requests')
+      .insert([{
+        hospital_name,
+        location,
+        blood_group,
+        units_needed,
+        urgency_level: urgency_level || 'Medium',
+        contact_number,
+        notes,
+        status: 'active'
+      }])
+      .select()
+      .single();
+
+    if (createError) throw createError;
+
+    // If urgent, find suitable donors and create notifications
+    if (urgency_level === 'Critical' || urgency_level === 'High') {
+      const { data: donors } = await supabase
+        .from('users')
+        .select('id, name, email, blood_group, city')
+        .eq('role', 'donor')
+        .eq('blood_group', blood_group);
+
+      if (donors && donors.length > 0) {
+        // Create notifications for all matching donors
+        const notifications = donors.map(donor => ({
+          user_id: donor.id,
+          type: 'donation_request',
+          message: `🚨 URGENT: ${hospital_name} needs ${units_needed} unit(s) of ${blood_group} blood. Location: ${location}. Contact: ${contact_number}`,
+          is_read: false
+        }));
+
+        await supabase.from('notifications').insert(notifications);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Donation request created successfully',
+      data: request
+    });
+  } catch (error) {
+    console.error('Create donation request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error creating donation request',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Notify all donors about a blood request
+ * @route   POST /api/admin/donation-requests/:id/notify-donors
+ * @access  Admin only
+ */
+exports.notifyDonorsAboutRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get the donation request
+    const { data: request, error: requestError } = await supabase
+      .from('donation_requests')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (requestError || !request) {
+      return res.status(404).json({
+        success: false,
+        message: 'Donation request not found'
+      });
+    }
+
+    // Find all donors with matching blood group
+    const { data: donors, error: donorsError } = await supabase
+      .from('users')
+      .select('id, name, email, blood_group')
+      .eq('role', 'donor')
+      .eq('blood_group', request.blood_group);
+
+    if (donorsError) throw donorsError;
+
+    if (!donors || donors.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No donors found with blood group ${request.blood_group}`
+      });
+    }
+
+    // Create notifications for all matching donors
+    const notifications = donors.map(donor => ({
+      user_id: donor.id,
+      type: 'donation_request',
+      message: `🩸 ${request.hospital_name} needs ${request.units_needed} unit(s) of ${request.blood_group} blood. Urgency: ${request.urgency_level}. Location: ${request.location}. Contact: ${request.contact_number}`,
+      is_read: false
+    }));
+
+    const { error: notifyError } = await supabase
+      .from('notifications')
+      .insert(notifications);
+
+    if (notifyError) throw notifyError;
+
+    res.json({
+      success: true,
+      message: `Notified ${donors.length} donor(s) successfully`,
+      data: {
+        notified_count: donors.length,
+        donors: donors.map(d => ({ id: d.id, name: d.name, email: d.email }))
+      }
+    });
+  } catch (error) {
+    console.error('Notify donors error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error notifying donors',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Get all donors (for assignment/notification)
+ * @route   GET /api/admin/donors
+ * @access  Admin only
+ */
+exports.getAllDonors = async (req, res) => {
+  try {
+    const { blood_group, city, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = supabase
+      .from('users')
+      .select('id, name, email, phone, blood_group, city, age, gender, created_at', { count: 'exact' })
+      .eq('role', 'donor')
+      .range(offset, offset + parseInt(limit) - 1)
+      .order('created_at', { ascending: false });
+
+    if (blood_group) {
+      query = query.eq('blood_group', blood_group);
+    }
+
+    if (city) {
+      query = query.ilike('city', `%${city}%`);
+    }
+
+    const { data: donors, error, count } = await query;
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      data: donors || [],
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: count,
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get all donors error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching donors',
       error: error.message
     });
   }

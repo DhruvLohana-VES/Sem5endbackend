@@ -7,7 +7,7 @@ exports.getProfile = async (req, res) => {
   try {
     const { data: donor, error } = await supabase
       .from('users')
-      .select('id, name, email, phone, blood_group, date_of_birth, city, address, is_available, total_donations, member_since')
+      .select('id, name, email, phone, blood_group, date_of_birth, city, address, is_available, total_donations, member_since, age, gender')
       .eq('id', req.user.id)
       .eq('role', 'donor')
       .single();
@@ -27,7 +27,9 @@ exports.getProfile = async (req, res) => {
       address: donor.address,
       isAvailable: donor.is_available,
       totalDonations: donor.total_donations,
-      memberSince: donor.member_since
+      memberSince: donor.member_since,
+      age: donor.age,
+      gender: donor.gender
     });
   } catch (error) {
     console.error('Get donor profile error:', error);
@@ -40,7 +42,16 @@ exports.getProfile = async (req, res) => {
 // @access  Private (Donor only)
 exports.updateProfile = async (req, res) => {
   try {
-    const allowedFields = ['name', 'phone', 'date_of_birth', 'city', 'address', 'blood_group'];
+    const allowedFields = [
+      'name', 
+      'phone', 
+      'date_of_birth', 
+      'city', 
+      'address', 
+      'blood_group',
+      'age',
+      'gender'
+    ];
     const updates = {};
 
     Object.keys(req.body).forEach(key => {
@@ -66,7 +77,9 @@ exports.updateProfile = async (req, res) => {
       phone: donor.phone,
       bloodGroup: donor.blood_group,
       city: donor.city,
-      address: donor.address
+      address: donor.address,
+      age: donor.age,
+      gender: donor.gender
     });
   } catch (error) {
     console.error('Update donor profile error:', error);
@@ -157,6 +170,7 @@ exports.getActiveRequests = async (req, res) => {
       contactNumber: req.contact_number,
       notes: req.notes,
       status: req.status,
+      datePosted: req.created_at,
       createdAt: req.created_at
     }));
 
